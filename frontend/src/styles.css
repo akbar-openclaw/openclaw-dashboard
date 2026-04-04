@@ -1,0 +1,157 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b1020;
+  color: #e8ecf8;
+}
+
+main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+p {
+  margin: 6px 0;
+}
+
+button {
+  border: 1px solid #3d4b7a;
+  background: #131a2f;
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid #253058;
+  border-radius: 14px;
+  background: #111936;
+  padding: 14px;
+  min-height: 260px;
+}
+
+.cardHeader p {
+  color: #97a1c9;
+  margin-top: 4px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list > li {
+  border: 1px solid #26315b;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0d1530;
+}
+
+.list.compact > li {
+  padding: 8px 10px;
+}
+
+.rowTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  border: 1px solid #4f5f95;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: #c5d0ff;
+}
+
+.pill.ok {
+  border-color: #2a8f61;
+  color: #8bf2c3;
+}
+
+.pill.warn {
+  border-color: #977c2a;
+  color: #f2db8b;
+}
+
+pre {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  border: 1px solid #2a3665;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0a1127;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.muted {
+  color: #95a1cd;
+}
+
+.error {
+  border: 1px solid #864343;
+  background: #2b1212;
+  color: #ffb2b2;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+details {
+  margin-top: 10px;
+}
+
+summary {
+  cursor: pointer;
+  color: #a8b6ef;
+}

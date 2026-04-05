@@ -9,6 +9,7 @@ try:
         BacklogResponse,
         ChannelStatus,
         EntryGroup,
+        KanbanColumn,
         MetricCard,
         RulebookResponse,
         RulebookSection,
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover - fallback for direct module execution
         BacklogResponse,
         ChannelStatus,
         EntryGroup,
+        KanbanColumn,
         MetricCard,
         RulebookResponse,
         RulebookSection,
@@ -36,6 +38,7 @@ BACKLOG_ENTRY_RE = re.compile(r"^###\s+(BL-\d{8}-\d{2})")
 RULEBOOK_SECTION_RE = re.compile(r"^##\s+(\d+)\)\s+(.*)$")
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 STATUS_ORDER = {"blocked": 0, "in-progress": 1, "todo": 2, "done": 3}
+KANBAN_STATUS_ORDER = ["todo", "in-progress", "blocked", "done"]
 SECTION_CATEGORY_LABELS = {
     "Shared baseline and propagation": "Shared context",
     "Workspace operating defaults": "Operating model",
@@ -47,6 +50,78 @@ SECTION_CATEGORY_LABELS = {
     "Toolchain defaults and special-case rules": "Tooling",
     "David and deployment rules": "Delivery",
 }
+
+
+def normalize_status(value: str | None, fallback: str | None = "todo") -> str | None:
+    normalized = re.sub(r"[\s_]+", "-", (value or "").strip().lower())
+    aliases = {
+        "to-do": "todo",
+        "todo": "todo",
+        "queued": "todo",
+        "in-progress": "in-progress",
+        "inprogress": "in-progress",
+        "active": "in-progress",
+        "blocked": "blocked",
+        "done": "done",
+        "complete": "done",
+        "completed": "done",
+    }
+    resolved = aliases.get(normalized, normalized)
+    if resolved in KANBAN_STATUS_ORDER:
+        return resolved
+    return fallback
+
+
+def normalize_priority(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in PRIORITY_ORDER else "medium"
+
+
+def date_sort_value(value: str | None) -> int:
+    digits = re.sub(r"\D", "", value or "")
+    return int(digits) if digits else 0
+
+
+def sort_backlog_entries(entries: list[BacklogEntry]) -> list[BacklogEntry]:
+    return sorted(
+        entries,
+        key=lambda entry: (
+            PRIORITY_ORDER.get(entry.priority, 99),
+            -date_sort_value(entry.date),
+            entry.title.lower(),
+        ),
+    )
+
+
+def describe_kanban_column(status: str, entries: list[BacklogEntry]) -> str:
+    count = len(entries)
+    high_priority = sum(1 for entry in entries if entry.priority == "high")
+    owners = len({entry.owner or "Unassigned" for entry in entries})
+
+    if count == 0:
+        if status == "todo":
+            return "Nothing queued right now."
+        if status == "in-progress":
+            return "No active work yet."
+        if status == "blocked":
+            return "No blockers tracked."
+        return "Nothing finished but still visible."
+
+    parts: list[str] = []
+    if high_priority:
+        parts.append(f"{high_priority} high-priority")
+    if owners:
+        parts.append(f"{owners} owner{'s' if owners != 1 else ''}")
+
+    status_hint = {
+        "todo": "ready to start",
+        "in-progress": "actively moving",
+        "blocked": "waiting on an unblocker",
+        "done": "ready to archive when appropriate",
+    }.get(status, "tracked")
+
+    prefix = " · ".join(parts)
+    return f"{prefix} · {status_hint}" if prefix else status_hint
 
 
 def compact_text(value: str, max_length: int = 140) -> str:
@@ -71,27 +146,34 @@ def parse_backlog(document: SourceDocument) -> BacklogResponse:
 
     entries: list[BacklogEntry] = []
     current: dict[str, object] | None = None
-    in_active = False
+    current_section_status: str | None = None
     collecting_scope = False
 
     for raw_line in document.raw_content.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
 
-        if stripped == "## Active items":
-            in_active = True
-            current = None
-            continue
         if stripped == "## Archive":
             break
-        if not in_active:
+
+        if stripped.startswith("## "):
+            heading = stripped[3:].strip()
+            current_section_status = normalize_status(heading, fallback=None)
+            if current is None:
+                collecting_scope = False
             continue
 
         match = BACKLOG_ENTRY_RE.match(stripped)
         if match:
             if current:
                 entries.append(BacklogEntry(**current))
-            current = {"id": match.group(1), "title": match.group(1), "scope": []}
+            current = {
+                "id": match.group(1),
+                "title": match.group(1),
+                "status": current_section_status or "todo",
+                "priority": "medium",
+                "scope": [],
+            }
             collecting_scope = False
             continue
 
@@ -111,10 +193,10 @@ def parse_backlog(document: SourceDocument) -> BacklogResponse:
             current["owner"] = stripped.split(":", 1)[1].strip()
             collecting_scope = False
         elif stripped.startswith("- Status:"):
-            current["status"] = stripped.split(":", 1)[1].strip().lower()
+            current["status"] = normalize_status(stripped.split(":", 1)[1].strip()) or "todo"
             collecting_scope = False
         elif stripped.startswith("- Priority:"):
-            current["priority"] = stripped.split(":", 1)[1].strip().lower()
+            current["priority"] = normalize_priority(stripped.split(":", 1)[1].strip())
             collecting_scope = False
         elif stripped.startswith("- Scope:"):
             collecting_scope = True
@@ -131,25 +213,27 @@ def parse_backlog(document: SourceDocument) -> BacklogResponse:
     if current:
         entries.append(BacklogEntry(**current))
 
-    entries.sort(key=lambda entry: (entry.date or "", entry.id), reverse=True)
+    entries.sort(key=lambda entry: (date_sort_value(entry.date), entry.id), reverse=True)
     total = len(entries)
     high_priority = [entry for entry in entries if entry.priority == "high"]
     blocked = [entry for entry in entries if entry.status == "blocked"]
+    in_progress = [entry for entry in entries if entry.status == "in-progress"]
     owners = sorted({entry.owner or "Unassigned" for entry in entries})
 
     metrics = [
-        MetricCard(label="Active items", value=str(total), tone="neutral", detail="Open work tracked in the shared backlog."),
+        MetricCard(label="Tracked items", value=str(total), tone="neutral", detail="Visible items in the shared backlog before archive."),
         MetricCard(label="High priority", value=str(len(high_priority)), tone="danger" if high_priority else "positive", detail="Needs attention first."),
+        MetricCard(label="In Progress", value=str(len(in_progress)), tone="neutral" if in_progress else "positive", detail="Actively moving right now."),
         MetricCard(label="Blocked", value=str(len(blocked)), tone="danger" if blocked else "positive", detail="Waiting on an unblocker."),
-        MetricCard(label="Owners", value=str(len(owners)), tone="neutral", detail="People currently carrying backlog work."),
+        MetricCard(label="Owners", value=str(len(owners)), tone="neutral", detail="People currently carrying visible backlog work."),
     ]
 
     priority_queue = sorted(
-        entries,
+        [entry for entry in entries if entry.status != "done"],
         key=lambda entry: (
             STATUS_ORDER.get(entry.status, 99),
             PRIORITY_ORDER.get(entry.priority, 99),
-            -(int(entry.date.replace("-", "")) if entry.date else 0),
+            -date_sort_value(entry.date),
         ),
     )[:6]
 
@@ -178,25 +262,32 @@ def parse_backlog(document: SourceDocument) -> BacklogResponse:
         )
 
     status_groups: list[EntryGroup] = []
+    kanban_columns: list[KanbanColumn] = []
     entries_by_status: dict[str, list[BacklogEntry]] = defaultdict(list)
     for entry in entries:
-        entries_by_status[entry.status].append(entry)
-    for status in ["blocked", "in-progress", "todo", "done"]:
-        status_entries = entries_by_status.get(status, [])
-        if not status_entries:
-            continue
+        entries_by_status[normalize_status(entry.status) or "todo"].append(entry)
+
+    for status in KANBAN_STATUS_ORDER:
+        status_entries = sort_backlog_entries(entries_by_status.get(status, []))
+        high_count = sum(1 for entry in status_entries if entry.priority == "high")
+
         status_groups.append(
             EntryGroup(
                 label=status.replace("-", " ").title(),
-                detail=f"{sum(1 for entry in status_entries if entry.priority == 'high')} high-priority" if status_entries else None,
+                detail=f"{high_count} high-priority" if status_entries else "No items",
                 count=len(status_entries),
-                entries=sorted(
-                    status_entries,
-                    key=lambda entry: (
-                        PRIORITY_ORDER.get(entry.priority, 99),
-                        entry.title.lower(),
-                    ),
-                )[:4],
+                entries=status_entries[:4],
+            )
+        )
+
+        kanban_columns.append(
+            KanbanColumn(
+                key=status,
+                label=status.replace("-", " ").title(),
+                detail=describe_kanban_column(status, status_entries),
+                count=len(status_entries),
+                high_priority_count=high_count,
+                entries=status_entries,
             )
         )
 
@@ -206,6 +297,7 @@ def parse_backlog(document: SourceDocument) -> BacklogResponse:
         priority_queue=priority_queue,
         owner_groups=owner_groups,
         status_groups=status_groups,
+        kanban_columns=kanban_columns,
         recent_entries=entries[:4],
     )
 

@@ -91,12 +91,22 @@ class EntryGroup(BaseModel):
     entries: list[BacklogEntry] = Field(default_factory=list)
 
 
+class KanbanColumn(BaseModel):
+    key: str
+    label: str
+    detail: str | None = None
+    count: int
+    high_priority_count: int = 0
+    entries: list[BacklogEntry] = Field(default_factory=list)
+
+
 class BacklogResponse(BaseModel):
     document: SourceDocument
     metrics: list[MetricCard] = Field(default_factory=list)
     priority_queue: list[BacklogEntry] = Field(default_factory=list)
     owner_groups: list[EntryGroup] = Field(default_factory=list)
     status_groups: list[EntryGroup] = Field(default_factory=list)
+    kanban_columns: list[KanbanColumn] = Field(default_factory=list)
     recent_entries: list[BacklogEntry] = Field(default_factory=list)
 
 

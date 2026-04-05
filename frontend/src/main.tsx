@@ -90,12 +90,22 @@ type EntryGroup = {
   entries: BacklogEntry[];
 };
 
+type KanbanColumn = {
+  key: string;
+  label: string;
+  detail?: string | null;
+  count: number;
+  high_priority_count: number;
+  entries: BacklogEntry[];
+};
+
 type BacklogResponse = {
   document: SourceDocument;
   metrics: MetricCard[];
   priority_queue: BacklogEntry[];
   owner_groups: EntryGroup[];
   status_groups: EntryGroup[];
+  kanban_columns: KanbanColumn[];
   recent_entries: BacklogEntry[];
 };
 
@@ -163,6 +173,19 @@ function statusClass(value: string): string {
   return 'muted';
 }
 
+function laneClass(value: string): string {
+  switch (value.toLowerCase()) {
+    case 'in-progress':
+      return 'laneInfo';
+    case 'blocked':
+      return 'laneWarning';
+    case 'done':
+      return 'laneSuccess';
+    default:
+      return 'laneNeutral';
+  }
+}
+
 function DashboardMetric({ label, value, detail, tone = 'neutral' }: MetricCard) {
   return (
     <article className={`metricCard ${toneClass(tone)}`}>
@@ -227,6 +250,34 @@ function BacklogEntryRow({ entry }: { entry: BacklogEntry }) {
           ))}
         </ul>
       ) : null}
+    </li>
+  );
+}
+
+function KanbanEntryCard({ entry }: { entry: BacklogEntry }) {
+  return (
+    <li className="kanbanEntry">
+      <div className="entryTop">
+        <div>
+          <strong>{entry.title}</strong>
+          <p className="muted lineMeta">{entry.id}</p>
+        </div>
+        <div className="entryBadges">
+          <EntryPill label={entry.priority} />
+        </div>
+      </div>
+      <p className="muted lineMeta">
+        Owner: {entry.owner || 'Unassigned'} · Requested by: {entry.requested_by || 'Unknown'}
+      </p>
+      <p className="muted lineMeta">{entry.date || 'No date'}</p>
+      {entry.scope.length > 0 ? (
+        <ul className="scopeList compactScopeList">
+          {entry.scope.slice(0, 2).map((scope, index) => (
+            <li key={`${entry.id}-kanban-scope-${index}`}>{scope}</li>
+          ))}
+        </ul>
+      ) : null}
+      {entry.notes ? <p className="muted lineMeta">Note: {entry.notes}</p> : null}
     </li>
   );
 }
@@ -381,7 +432,7 @@ function App() {
       <section className="grid singleCol">
         <Card
           title="Backlog Intelligence"
-          subtitle="Priority-first queue and grouped ownership view from shared backlog."
+          subtitle="Kanban board grouped by shared backlog Status values, with queue and ownership summaries."
           action={data ? <span className="sourceText">Source: {data.backlog.document.source}</span> : null}
         >
           {!data ? (
@@ -394,18 +445,56 @@ function App() {
                 ))}
               </div>
 
-              <div className="splitCols">
+              <div className="backlogHint">
+                <p>
+                  This board follows each item’s <code>Status:</code> field in the shared backlog. Moving work later should only require
+                  editing that single status value.
+                </p>
+              </div>
+
+              <div className="kanbanBoard">
+                {data.backlog.kanban_columns.map((column) => (
+                  <section key={column.key} className={`kanbanLane ${laneClass(column.key)}`}>
+                    <div className="kanbanLaneHeader">
+                      <div>
+                        <div className="kanbanLaneTitleRow">
+                          <h3>{column.label}</h3>
+                          <span className="kanbanLaneCount">{column.count}</span>
+                        </div>
+                        {column.detail ? <p className="muted lineMeta">{column.detail}</p> : null}
+                      </div>
+                      {column.high_priority_count > 0 ? <EntryPill label={`${column.high_priority_count} high`} /> : null}
+                    </div>
+
+                    {column.entries.length > 0 ? (
+                      <ul className="kanbanList">
+                        {column.entries.map((entry) => (
+                          <KanbanEntryCard key={`${column.key}-${entry.id}`} entry={entry} />
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="kanbanEmpty">No items in this lane.</div>
+                    )}
+                  </section>
+                ))}
+              </div>
+
+              <div className="splitCols backlogSecondary">
                 <div>
                   <h3>Priority Queue</h3>
-                  <ul className="list">
-                    {data.backlog.priority_queue.map((entry) => (
-                      <BacklogEntryRow key={entry.id} entry={entry} />
-                    ))}
-                  </ul>
+                  {data.backlog.priority_queue.length > 0 ? (
+                    <ul className="list">
+                      {data.backlog.priority_queue.map((entry) => (
+                        <BacklogEntryRow key={entry.id} entry={entry} />
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">No queued work outside the done lane.</p>
+                  )}
                 </div>
 
                 <div>
-                  <h3>Grouped by owner</h3>
+                  <h3>Owner Load</h3>
                   <ul className="list compact">
                     {data.backlog.owner_groups.map((group) => (
                       <li key={group.label}>
@@ -422,15 +511,6 @@ function App() {
                       </li>
                     ))}
                   </ul>
-
-                  <h3>Status breakdown</h3>
-                  <div className="channelRow">
-                    {data.backlog.status_groups.map((group) => (
-                      <span key={group.label} className={`pill ${statusClass(group.label)}`}>
-                        {group.label}: {group.count}
-                      </span>
-                    ))}
-                  </div>
                 </div>
               </div>
             </>

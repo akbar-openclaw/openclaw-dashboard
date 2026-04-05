@@ -72,7 +72,7 @@ def test_parse_backlog_builds_summary_groups():
         title="Shared backlog",
         source="/tmp/backlog.md",
         exists=True,
-        raw_content="""## Active items
+        raw_content="""## Todo
 
 ### BL-20260404-01
 - Date: 2026-04-04
@@ -96,17 +96,46 @@ def test_parse_backlog_builds_summary_groups():
   - improve layout
   - summarize data
 
+## In Progress
+
+### BL-20260404-03
+- Date: 2026-04-05
+- Title: Verify update flow
+- Requested by: Akbar
+- Owner: Chloe
+- Status: in-progress
+- Priority: high
+- Scope:
+  - test a real update
+  - verify the end-to-end flow
+
+## Blocked
+
+### BL-20260404-04
+- Date: 2026-04-05
+- Title: Provider backup review
+- Requested by: David
+- Owner: Chloe
+- Status: blocked
+- Priority: low
+- Scope:
+  - confirm snapshot posture
+
 ## Archive
 """,
     )
 
     backlog = parse_backlog(document)
 
-    assert backlog.metrics[0].value == "2"
-    assert backlog.metrics[1].value == "1"
-    assert backlog.priority_queue[0].title == "Polish dashboard"
+    assert backlog.metrics[0].value == "4"
+    assert backlog.metrics[1].value == "2"
+    assert backlog.priority_queue[0].title == "Provider backup review"
     assert backlog.owner_groups[0].label in {"Chloe", "David"}
-    assert backlog.status_groups[0].label == "In Progress"
+    assert [group.label for group in backlog.status_groups] == ["Todo", "In Progress", "Blocked", "Done"]
+    assert backlog.kanban_columns[0].count == 1
+    assert backlog.kanban_columns[1].count == 2
+    assert backlog.kanban_columns[1].entries[0].title == "Verify update flow"
+    assert any(entry.title == "Polish dashboard" for entry in backlog.kanban_columns[1].entries)
 
 
 def test_parse_rulebook_extracts_sections_and_highlights():

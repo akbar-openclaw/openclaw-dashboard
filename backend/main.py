@@ -6,10 +6,26 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
-    from .schemas import AgentSummary, BacklogResponse, DashboardResponse, RulebookResponse, StatusResponse
+    from .schemas import (
+        AgentSummary,
+        BacklogResponse,
+        BacklogStatusUpdateRequest,
+        BacklogStatusUpdateResponse,
+        DashboardResponse,
+        RulebookResponse,
+        StatusResponse,
+    )
     from .services import DashboardService, FRONTEND_DIST
 except ImportError:  # pragma: no cover - fallback for uvicorn main:app from backend/
-    from schemas import AgentSummary, BacklogResponse, DashboardResponse, RulebookResponse, StatusResponse
+    from schemas import (
+        AgentSummary,
+        BacklogResponse,
+        BacklogStatusUpdateRequest,
+        BacklogStatusUpdateResponse,
+        DashboardResponse,
+        RulebookResponse,
+        StatusResponse,
+    )
     from services import DashboardService, FRONTEND_DIST
 
 app = FastAPI(title="Akbar's personal dashboard", version="0.2.0")
@@ -37,6 +53,18 @@ async def status() -> StatusResponse:
 @app.get("/api/backlog", response_model=BacklogResponse)
 def backlog() -> BacklogResponse:
     return service.data_source.get_backlog()
+
+
+@app.patch("/api/backlog/{entry_id}", response_model=BacklogStatusUpdateResponse)
+def update_backlog_status(entry_id: str, payload: BacklogStatusUpdateRequest) -> BacklogStatusUpdateResponse:
+    try:
+        return service.data_source.update_backlog_status(entry_id, payload.status)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/rulebook", response_model=RulebookResponse)

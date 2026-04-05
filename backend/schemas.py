@@ -110,6 +110,16 @@ class BacklogResponse(BaseModel):
     recent_entries: list[BacklogEntry] = Field(default_factory=list)
 
 
+class BacklogStatusUpdateRequest(BaseModel):
+    status: str
+
+
+class BacklogStatusUpdateResponse(BaseModel):
+    entry_id: str
+    status: str
+    backlog: BacklogResponse
+
+
 class RulebookSection(BaseModel):
     id: str
     title: str

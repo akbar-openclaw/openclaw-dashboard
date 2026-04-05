@@ -43,6 +43,7 @@ Then open the backend on `http://127.0.0.1:8000/` after the frontend has been bu
 - `GET /api/agents` — live agent/session summary
 - `GET /api/status` — OpenClaw command output + parsed runtime/security/channel summaries
 - `GET /api/backlog` — parsed backlog summary model (metrics, queue, grouped sections)
+- `PATCH /api/backlog/{entry_id}` — update only the backlog item `Status:` field and return the refreshed backlog summary
 - `GET /api/rulebook` — parsed rulebook digest model (highlights + grouped sections)
 
 ## Backend architecture
@@ -57,3 +58,4 @@ This split keeps the app ready for auth layers and alternate data providers with
 - Shared documents are read from `/home/ubuntu/.openclaw/workspace/`.
 - Agent/session data is read from OpenClaw CLI commands so the UI stays aligned with the real runtime.
 - The backend is structured so future auth or alternate data providers can be added without rewriting the frontend.
+- The frontend now normalizes API payloads and renders safe fallbacks so schema drift or partial backend responses do not hard-crash the page.

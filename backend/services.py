@@ -4,33 +4,57 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+import tempfile
 from typing import Protocol
 
 try:
     from .parsers import (
         build_status_summaries,
+        KANBAN_STATUS_ORDER,
+        normalize_status,
         parse_backlog,
         parse_channels,
         parse_rulebook,
         parse_security_notices,
         parse_status_facts,
     )
-    from .schemas import AgentSummary, BacklogResponse, CliResult, DashboardResponse, RulebookResponse, SourceDocument, StatusResponse
+    from .schemas import (
+        AgentSummary,
+        BacklogResponse,
+        BacklogStatusUpdateResponse,
+        CliResult,
+        DashboardResponse,
+        RulebookResponse,
+        SourceDocument,
+        StatusResponse,
+    )
 except ImportError:  # pragma: no cover - fallback for direct module execution
     from parsers import (
         build_status_summaries,
+        KANBAN_STATUS_ORDER,
+        normalize_status,
         parse_backlog,
         parse_channels,
         parse_rulebook,
         parse_security_notices,
         parse_status_facts,
     )
-    from schemas import AgentSummary, BacklogResponse, CliResult, DashboardResponse, RulebookResponse, SourceDocument, StatusResponse
+    from schemas import (
+        AgentSummary,
+        BacklogResponse,
+        BacklogStatusUpdateResponse,
+        CliResult,
+        DashboardResponse,
+        RulebookResponse,
+        SourceDocument,
+        StatusResponse,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 AGENT_WORKSPACE = ROOT.parent
 SHARED_WORKSPACE = AGENT_WORKSPACE.parent / "workspace"
+SHARED_BACKLOG_PATH = SHARED_WORKSPACE / "shared-backlog.md"
 OPENCLAW_BIN = Path("/home/ubuntu/.npm-global/bin/openclaw")
 
 
@@ -41,12 +65,62 @@ class DashboardDataSource(Protocol):
 
     def get_backlog(self) -> BacklogResponse: ...
 
+    def update_backlog_status(self, entry_id: str, status: str) -> BacklogStatusUpdateResponse: ...
+
     def get_rulebook(self) -> RulebookResponse: ...
 
 
 class OpenClawWorkspaceDataSource:
     def read_text(self, path: Path) -> str:
         return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def atomic_write_text(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            handle.write(content)
+            temp_path = Path(handle.name)
+        temp_path.replace(path)
+
+    def replace_entry_status(self, document: str, entry_id: str, next_status: str) -> str:
+        lines = document.splitlines(keepends=True)
+        entry_heading = f"### {entry_id}"
+        start_index: int | None = None
+        end_index = len(lines)
+
+        for index, line in enumerate(lines):
+            if line.strip() == entry_heading:
+                start_index = index
+                continue
+            if start_index is not None and line.startswith("### BL-"):
+                end_index = index
+                break
+
+        if start_index is None:
+            raise KeyError(f"Backlog entry {entry_id} not found")
+
+        block = lines[start_index:end_index]
+        for offset, line in enumerate(block):
+            stripped = line.lstrip()
+            if stripped.startswith("- Status:"):
+                prefix, _, remainder = line.partition("- Status:")
+                newline = "\n" if line.endswith("\n") else ""
+                existing_value = remainder.strip()
+                if normalize_status(existing_value) == next_status:
+                    return document
+                block[offset] = f"{prefix}- Status: {next_status}{newline}"
+                updated_lines = lines[:start_index] + block + lines[end_index:]
+                return "".join(updated_lines)
+
+        insert_at = len(block)
+        for offset, line in enumerate(block):
+            stripped = line.lstrip()
+            if stripped.startswith("- Priority:") or stripped.startswith("- Scope:"):
+                insert_at = offset
+                break
+
+        block.insert(insert_at, f"- Status: {next_status}\n")
+        updated_lines = lines[:start_index] + block + lines[end_index:]
+        return "".join(updated_lines)
 
     async def run_cli(self, *command: str, timeout: int = 20) -> CliResult:
         try:
@@ -148,7 +222,24 @@ class OpenClawWorkspaceDataSource:
         return SourceDocument(title=title, source=str(path), exists=path.exists(), raw_content=self.read_text(path))
 
     def get_backlog(self) -> BacklogResponse:
-        return parse_backlog(self.get_document("Shared backlog", SHARED_WORKSPACE / "shared-backlog.md"))
+        return parse_backlog(self.get_document("Shared backlog", SHARED_BACKLOG_PATH))
+
+    def update_backlog_status(self, entry_id: str, status: str) -> BacklogStatusUpdateResponse:
+        normalized_status = normalize_status(status, fallback=None)
+        if normalized_status not in KANBAN_STATUS_ORDER:
+            allowed = ", ".join(KANBAN_STATUS_ORDER)
+            raise ValueError(f"Invalid status '{status}'. Use one of: {allowed}")
+
+        if not SHARED_BACKLOG_PATH.exists():
+            raise FileNotFoundError(f"Backlog file not found: {SHARED_BACKLOG_PATH}")
+
+        original = self.read_text(SHARED_BACKLOG_PATH)
+        updated = self.replace_entry_status(original, entry_id, normalized_status)
+        if updated != original:
+            self.atomic_write_text(SHARED_BACKLOG_PATH, updated)
+
+        backlog = self.get_backlog()
+        return BacklogStatusUpdateResponse(entry_id=entry_id, status=normalized_status, backlog=backlog)
 
     def get_rulebook(self) -> RulebookResponse:
         return parse_rulebook(self.get_document("Shared rulebook", SHARED_WORKSPACE / "shared-rulebook.md"))

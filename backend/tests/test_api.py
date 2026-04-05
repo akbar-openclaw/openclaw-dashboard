@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,7 @@ from parsers import parse_backlog, parse_rulebook, parse_security_notices, parse
 from schemas import (
     AgentSummary,
     BacklogResponse,
+    BacklogStatusUpdateResponse,
     CliResult,
     DashboardResponse,
     RulebookResponse,
@@ -43,6 +45,13 @@ class FakeDataSource:
     def get_backlog(self):
         return BacklogResponse(document=SourceDocument(title="Shared backlog", source="/tmp/backlog.md", exists=True, raw_content="# sample"))
 
+    def update_backlog_status(self, entry_id: str, status: str):
+        return BacklogStatusUpdateResponse(
+            entry_id=entry_id,
+            status=status,
+            backlog=self.get_backlog(),
+        )
+
     def get_rulebook(self):
         return RulebookResponse(
             document=SourceDocument(title="Shared rulebook", source="/tmp/rulebook.md", exists=True, raw_content="# sample"),
@@ -65,6 +74,21 @@ def test_dashboard_endpoint_with_stubbed_sources():
     assert payload["openclaw"]["summaries"][0]["severity"] == "success"
     assert payload["backlog"]["document"]["raw_content"] == "# sample"
     assert payload["rulebook"]["sections"][0]["category"] == "Shared context"
+
+
+def test_backlog_status_patch_endpoint_with_stubbed_source():
+    original_service = main.service
+    main.service = main.DashboardService(FakeDataSource())
+    try:
+        client = TestClient(main.app)
+        response = client.patch("/api/backlog/BL-20260404-01", json={"status": "done"})
+    finally:
+        main.service = original_service
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["entry_id"] == "BL-20260404-01"
+    assert payload["status"] == "done"
 
 
 def test_parse_backlog_builds_summary_groups():
@@ -185,3 +209,41 @@ Channels
     assert facts[1].value == "4 active · 8 issues"
     assert security_summary == "0 critical · 2 warn · 1 info"
     assert notices[0].fix == "Configure trusted proxies."
+
+
+def test_replace_entry_status_only_changes_target_status_field():
+    with TemporaryDirectory() as temp_dir:
+        backlog_path = Path(temp_dir) / "shared-backlog.md"
+        backlog_path.write_text(
+            """## Todo
+
+### BL-20260404-01
+- Date: 2026-04-04
+- Title: Harden SSH
+- Requested by: David
+- Owner: Chloe
+- Status: todo
+- Priority: high
+- Scope:
+  - tighten SSH auth
+
+### BL-20260404-02
+- Date: 2026-04-04
+- Title: Leave me alone
+- Requested by: David
+- Owner: Chloe
+- Status: blocked
+- Priority: medium
+- Scope:
+  - keep status untouched
+""",
+            encoding="utf-8",
+        )
+
+        source = main.DashboardService().data_source
+        original = backlog_path.read_text(encoding="utf-8")
+        updated = source.replace_entry_status(original, "BL-20260404-01", "done")
+
+        assert "### BL-20260404-01\n- Date: 2026-04-04\n- Title: Harden SSH\n- Requested by: David\n- Owner: Chloe\n- Status: done\n- Priority: high" in updated
+        assert "### BL-20260404-02\n- Date: 2026-04-04\n- Title: Leave me alone\n- Requested by: David\n- Owner: Chloe\n- Status: blocked\n- Priority: medium" in updated
+        assert "tighten SSH auth" in updated

@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 AGENT_WORKSPACE = ROOT.parent
 SHARED_WORKSPACE = AGENT_WORKSPACE.parent / "workspace"
+OPENCLAW_BIN = Path("/home/ubuntu/.npm-global/bin/openclaw")
 
 
 class CliResult(BaseModel):
@@ -103,8 +104,8 @@ async def run_cli(*command: str, timeout: int = 20) -> CliResult:
 
 async def get_agent_summaries() -> list[AgentSummary]:
     agents_result, sessions_result = await asyncio.gather(
-        run_cli("openclaw", "agents", "list", "--json"),
-        run_cli("openclaw", "sessions", "--all-agents", "--json", timeout=30),
+        run_cli(str(OPENCLAW_BIN), "agents", "list", "--json"),
+        run_cli(str(OPENCLAW_BIN), "sessions", "--all-agents", "--json", timeout=30),
     )
 
     agents_payload = []
@@ -181,8 +182,8 @@ def build_status_summaries(status: CliResult, gateway: CliResult) -> list[Status
 
 async def get_openclaw_status() -> StatusResponse:
     status_result, gateway_result = await asyncio.gather(
-        run_cli("openclaw", "status", timeout=30),
-        run_cli("openclaw", "gateway", "status", timeout=20),
+        run_cli(str(OPENCLAW_BIN), "status", timeout=30),
+        run_cli(str(OPENCLAW_BIN), "gateway", "status", timeout=20),
     )
     return StatusResponse(
         status=status_result,

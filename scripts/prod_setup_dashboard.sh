@@ -20,7 +20,7 @@ After=network.target
 [Service]
 User=ubuntu
 WorkingDirectory=$APP_DIR
-Environment="PATH=$APP_DIR/.venv/bin:/usr/bin:/bin"
+Environment="PATH=$APP_DIR/.venv/bin:/home/ubuntu/.npm-global/bin:/usr/bin:/bin"
 ExecStart=$APP_DIR/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
